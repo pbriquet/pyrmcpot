@@ -1,0 +1,132 @@
+include init.mod
+include potential.mod
+
+# Compute initial state
+fix 3 all box/relax  aniso 0.0
+minimize ${etol} ${ftol} ${maxiter} ${maxeval}
+
+# Write the equilibrium lattice parameters, etc, into the potdata.dat file:
+variable lxrelax equal lx
+variable lyrelax equal ly
+variable lzrelax equal lz
+variable xyrelax equal xy
+variable xzrelax equal xz
+variable yzrelax equal yz
+print ${lxrelax} file potdata.dat screen no
+print ${lyrelax}/${lxrelax} append potdata.dat screen no
+print ${lzrelax}/${lxrelax} append potdata.dat screen no
+print ${xyrelax} append potdata.dat screen no
+print ${xzrelax} append potdata.dat screen no
+print ${yzrelax} append potdata.dat screen no
+
+variable tmp equal pxx
+variable pxx0 equal ${tmp}
+variable tmp equal pyy
+variable pyy0 equal ${tmp}
+variable tmp equal pzz
+variable pzz0 equal ${tmp}
+variable tmp equal pyz
+variable pyz0 equal ${tmp}
+variable tmp equal pxz
+variable pxz0 equal ${tmp}
+variable tmp equal pxy
+variable pxy0 equal ${tmp}
+
+variable tmp equal lx
+variable lx0 equal ${tmp}
+variable tmp equal ly
+variable ly0 equal ${tmp}
+variable tmp equal lz
+variable lz0 equal ${tmp}
+
+# These formulas define the derivatives w.r.t. strain components
+# Constants uses $, variables use v_ 
+variable d1 equal -(v_pxx1-${pxx0})/(v_delta/v_len0)*${cfac}
+variable d2 equal -(v_pyy1-${pyy0})/(v_delta/v_len0)*${cfac}
+variable d3 equal -(v_pzz1-${pzz0})/(v_delta/v_len0)*${cfac}
+variable d4 equal -(v_pyz1-${pyz0})/(v_delta/v_len0)*${cfac}
+variable d5 equal -(v_pxz1-${pxz0})/(v_delta/v_len0)*${cfac}
+variable d6 equal -(v_pxy1-${pxy0})/(v_delta/v_len0)*${cfac}
+
+displace_atoms all random ${atomjiggle} ${atomjiggle} ${atomjiggle} 87287 units box
+
+# Write restart
+unfix 3
+write_restart restart.equil
+
+# uxx Perturbation
+
+variable dir equal 1
+include displace.mod
+
+# uyy Perturbation
+
+variable dir equal 2
+include displace.mod
+
+# uzz Perturbation
+
+variable dir equal 3
+include displace.mod
+
+# uyz Perturbation
+
+variable dir equal 4
+include displace.mod
+
+# uxz Perturbation
+
+variable dir equal 5
+include displace.mod
+
+# uxy Perturbation
+
+variable dir equal 6
+include displace.mod
+
+# Output final values
+variable C11all equal ${C11}
+variable C22all equal ${C22}
+variable C33all equal ${C33}
+variable C12all equal 0.5*(${C12}+${C21})
+variable C13all equal 0.5*(${C13}+${C31})
+variable C23all equal 0.5*(${C23}+${C32})
+variable C44all equal ${C44}
+variable C55all equal ${C55}
+variable C66all equal ${C66}
+variable C14all equal 0.5*(${C14}+${C41})
+variable C15all equal 0.5*(${C15}+${C51})
+variable C16all equal 0.5*(${C16}+${C61})
+variable C24all equal 0.5*(${C24}+${C42})
+variable C25all equal 0.5*(${C25}+${C52})
+variable C26all equal 0.5*(${C26}+${C62})
+variable C34all equal 0.5*(${C34}+${C43})
+variable C35all equal 0.5*(${C35}+${C53})
+variable C36all equal 0.5*(${C36}+${C63})
+variable C45all equal 0.5*(${C45}+${C54})
+variable C46all equal 0.5*(${C46}+${C64})
+variable C56all equal 0.5*(${C56}+${C65})
+
+# Write the elastic stifness tensor components into potdata.dat
+print "${C11all}" append potdata.dat screen no
+print "${C22all}" append potdata.dat screen no
+print "${C33all}" append potdata.dat screen no
+print "${C12all}" append potdata.dat screen no
+print "${C13all}" append potdata.dat screen no
+print "${C23all}" append potdata.dat screen no
+print "${C44all}" append potdata.dat screen no
+print "${C55all}" append potdata.dat screen no
+print "${C66all}" append potdata.dat screen no
+print "${C14all}" append potdata.dat screen no
+print "${C15all}" append potdata.dat screen no
+print "${C16all}" append potdata.dat screen no
+print "${C24all}" append potdata.dat screen no
+print "${C25all}" append potdata.dat screen no
+print "${C26all}" append potdata.dat screen no
+print "${C34all}" append potdata.dat screen no
+print "${C35all}" append potdata.dat screen no
+print "${C36all}" append potdata.dat screen no
+print "${C45all}" append potdata.dat screen no
+print "${C46all}" append potdata.dat screen no
+print "${C56all}" append potdata.dat screen no  
+

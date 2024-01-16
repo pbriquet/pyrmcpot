@@ -1,0 +1,934 @@
+! Obtain an EAM potential in LAMMPS format
+module eamalloy
+	use globals
+
+	private			:: femb,frho,fpair,h,check_emb,check_rho,check_pair
+	public			:: eam_readinput,eam_writepot
+
+! Constants
+	integer,parameter,private		:: MAXELEEAM=2
+	integer,parameter,private		:: MAXPTS=20
+	integer,parameter,private		:: MAXR=7
+
+! Work variables
+	integer,private				:: nparpair,nparrho,nparemb
+	integer,private				:: eam_return
+	double precision,private		:: eam_delta
+	double precision,allocatable,private	:: eam_pair(:,:)
+	double precision,allocatable,private	:: eam_rho(:,:)
+	double precision,allocatable,private	:: eam_emb(:,:)
+
+! Input variables
+	integer,public		:: eam_nel			! A maximum of 2 elements can be considered in the fitting procedure
+	integer,public		:: eam_anumber(MAXELEEAM)	! Atomic number of the i-th element
+	integer,public		:: eam_cd_ncoeff		! Number of coefficients in a Concentration Dependend EAM potential
+	integer,public		:: eam_nr,eam_nrho		! Number of points in the pairwise interaction files and density files
+	integer,public		:: eam_nknotspair		! Number of knots in the cubic-splined pair function (Mendelev approach)
+	integer,public		:: eam_nknotsrho		! Number of knots in the cubic-splined rho function (Mendelev approach)
+	double precision,public	:: eam_knotspair(MAXPTS)	! Position of knots in the cubic-splined pair function (Mendelev approach)
+	double precision,public	:: eam_knotsrho(MAXPTS)		! Position of knots in the cubic-splined pair function (Mendelev approach)
+	character*2,public	:: eam_el(MAXELEEAM)		! Elements in the fitting procedure
+	character*40,public	:: eam_pairfile(MAXELEEAM+1)	! Files containing existing pairwise data for the i-th element
+	character*40,public	:: eam_rhofile(MAXELEEAM+2)	! Files containing existing rho data for the i-th element
+	character*40,public	:: eam_embfile(MAXELEEAM)	! Files containing existing embedding data for the i-th element
+	character*5,public	:: eam_struct(MAXELEEAM)	! Crystal structure of the i-th element
+	character*20,public	:: eam_rhofunc			! Analytical function describing the density function
+	character*20,public	:: eam_pairfunc			! Analytical function describing the pairwise interactions
+	character*20,public	:: eam_embfunc			! Analytical function describing the embedding function
+	logical,public		:: eam_existemb(MAXELEEAM)	! If .true., read the embedding and rho data from the provided files
+	logical,public		:: eam_existpair(MAXELEEAM)	! If .true., read the elemental pair data from the provided files
+	logical,public		:: eam_fs			! If .true., an EAM potential of Finnis-Sinclair type will be generated
+	logical,public		:: eam_fs_rhoscale		! If .true., the cross density function of Finnis-Sinclair will be rescaled
+	logical,public		:: eam_existcrosspair		! If .true., the cross pair interaction will be obtained from a file
+	double precision,public	:: eam_cut			! Distance cutoff for pairwise interactions
+	double precision,public	:: eam_dr,eam_drho		! delta r and delta rho
+	double precision,public	:: eam_rmax(MAXR)		! Maximum value of r used in the fitting procedure per potential function
+	double precision,public	:: eam_rmin			! Minimum distance below which interactions are considered unphysical
+	double precision,public	:: eam_amass(MAXELEEAM)		! Atomic mass of the i-th element
+	double precision,public	:: eam_a0(MAXELEEAM)		! Lattice parameter of the i-th element
+	double precision,public	:: eam_r0(MAXR)			! Inner cutoff distance used in some computations
+
+	namelist /inpeamalloy/ eam_nel,eam_el,eam_existemb,eam_pairfile,eam_rhofile,eam_embfile,eam_nr,eam_cd_ncoeff,eam_existpair, &
+	& eam_nrho,eam_dr,eam_drho,eam_anumber,eam_amass,eam_a0,eam_rmax,eam_struct,eam_rhofunc,eam_pairfunc,eam_existcrosspair, &
+	& eam_cut,eam_nknotspair,eam_nknotsrho,eam_embfunc,eam_r0,eam_rmin,eam_fs,eam_fs_rhoscale,eam_knotsrho,eam_knotspair
+
+contains
+	! Read the input file for the EAM alloy potential
+	subroutine eam_readinput
+		implicit none
+
+		integer			:: i,nparabsent
+		double precision	:: dummy
+
+		! Initialize input variables
+		eam_nel=1
+		eam_cd_ncoeff=0
+		eam_el(1)='Fe'
+		eam_anumber(1)=26
+		eam_amass(1)=55.845
+		eam_a0(1)=2.8553
+		eam_cut=6.0
+		eam_nr=5000
+		eam_nrho=5000
+		eam_dr=0.001
+		eam_drho=0.001
+		eam_fs=.false.
+		eam_fs_rhoscale=.true.
+		eam_existemb=.false.
+		eam_existpair=.false.
+		eam_existcrosspair=.false.
+		eam_struct='bcc'
+		eam_rmax=4.0
+		eam_rmin=0.5
+		eam_nknotspair=12
+		eam_nknotsrho=6
+		eam_knotspair=0.0
+		eam_knotsrho=0.0
+		eam_pairfile(1)='pair_1.dat'
+		eam_pairfile(2)='pair_2.dat'
+		eam_pairfile(3)='pair_12.dat'
+		eam_rhofile(1)='rho_1.dat'
+		eam_rhofile(2)='rho_2.dat'
+		eam_rhofile(3)='rho_12.dat'
+		eam_rhofile(4)='rho_21.dat'
+		eam_embfile(1)='emb_1.dat'
+		eam_embfile(2)='emb_2.dat'
+		eam_rhofunc='mendelev'
+		eam_pairfunc='mendelev'
+		eam_embfunc='quadratic'
+		eam_r0=0.5
+		nparabsent=0
+
+		! Reopen the input file
+		open(24,file='pot.inp',status='old',err=417)
+
+		goto 418
+
+417		stop 'EAM_READINPUT: File pot.inp not found!'
+
+418		read(24,inpeamalloy)
+
+		close(24)
+
+		! Number or pairwise parameters to be fitted
+		select case(eam_pairfunc)
+			case('mendelev')
+				nparpair=eam_nknotspair
+			case('generalized-morse')
+				nparpair=5
+			case('screened-morse')
+				nparpair=3
+			case('tersoff-like')
+				nparpair=5
+			case('exp-decay')
+				nparpair=2
+			case('exp-decay-quartscr')
+				nparpair=2
+			case('exp-decay-sinscr')
+				nparpair=2			
+			case('default')
+				stop 'EAM_READINPUT: Pairwise function type not supported yet!'
+		end select
+
+		! Number of density function parameters to be fitted
+		select case(eam_rhofunc)
+			case('mendelev')
+				nparrho=eam_nknotsrho
+			case('thomas-fermi')
+				nparrho=3
+			case('exp-decay')
+				nparrho=2
+			case('exp-decay-quartscr')
+				nparrho=2
+			case('exp-decay-sinscr')
+				nparrho=2
+			case default
+				stop 'EAM_READINPUT: Density function type not supported yet!'
+		end select
+
+		! Number of embedding function parameters to be fitted
+		select case(eam_embfunc)
+			case('quadratic')
+				nparemb=2
+			case('quartic')
+				nparemb=4
+			case default
+				stop 'EAM_READINPUT: Embedding function type not supported yet!'
+		end select
+
+		! What if the number of elements is not supported?
+		if(eam_nel<1.or.eam_nel>2) stop 'EAM_READINPUT: Number of elements is out of bounds!'
+
+		! If this is a Concentration Dependent potential, Finnis Sinclair is disabled
+		if(eam_nel==2.and.eam_cd_ncoeff>0) eam_fs=.false.
+
+		! Allocate the arrays that store the points to be saved into the potential file
+		if(eam_nel==1)then
+			allocate(eam_pair(1,eam_nr))
+			allocate(eam_emb(1,eam_nrho))
+			allocate(eam_rho(1,eam_nr))
+		elseif(eam_nel==2)then
+			allocate(eam_pair(MAXELEEAM+1,eam_nr))
+			allocate(eam_emb(MAXELEEAM,eam_nrho))
+
+			if(.not.eam_fs)then		
+				allocate(eam_rho(MAXELEEAM,eam_nr))
+			else
+				allocate(eam_rho(MAXELEEAM+2,eam_nr))
+			end if
+		end if
+
+		! Determine the actual number of parameters in case existing values for the potentials are provided
+		if(eam_nel==1) then
+			nparams=nparpair+nparrho+nparemb	
+		elseif(eam_nel==2)then
+			if(eam_fs)then
+				if(eam_fs_rhoscale)then
+					nparams=(nparpair+nparrho+nparemb)*2+nparpair+2
+				else
+					nparams=(nparpair+2*nparrho+nparemb)*2+nparpair
+				end if
+			else
+				nparams=(nparpair+nparrho+nparemb)*2+nparpair+eam_cd_ncoeff
+			end if
+
+			if(eam_existemb(1).and.eam_existemb(2))then
+				nparabsent=nparabsent+(nparemb+nparrho)*2
+			elseif(eam_existemb(1).or.eam_existemb(2))then
+				nparabsent=nparabsent+nparemb+nparrho
+			end if
+
+			if(eam_existpair(1).and.eam_existpair(2))then
+				nparabsent=nparabsent+nparpair*2
+			elseif(eam_existpair(1).or.eam_existpair(2))then
+				nparabsent=nparabsent+nparpair
+			end if
+
+			if(eam_existcrosspair)then
+				nparabsent=nparabsent+nparpair
+			end if
+
+			nparams=nparams-nparabsent
+
+			! Populate the arrays with data from preexisting potential for element 1
+			if(eam_existpair(1))then
+				open(50,file=eam_pairfile(1),status='old')
+
+				do i=1,eam_nr
+					read(50,*) dummy,eam_pair(1,i)
+				end do
+
+				close(50)
+			end if
+
+			if(eam_existemb(1))then
+				open(51,file=eam_rhofile(1),status='old')
+
+				do i=1,eam_nr
+					read(51,*) dummy,eam_rho(1,i) 
+				end do
+
+				close(51)
+
+				open(52,file=eam_embfile(1),status='old')
+
+				do i=1,eam_nrho
+					read(52,*) dummy,eam_emb(1,i) 
+				end do
+
+				close(52)
+			end if
+
+			! Populate the arrays with data from preexisting potential for element 2
+			if(eam_existpair(2))then
+				open(53,file=eam_pairfile(2),status='old')
+
+				do i=1,eam_nr
+					read(53,*) dummy,eam_pair(2,i) 
+				end do
+
+				close(53)
+			end if
+
+			if(eam_existemb(2))then
+				open(54,file=eam_rhofile(2),status='old')
+
+				do i=1,eam_nr
+					read(54,*) dummy,eam_rho(2,i) 
+				end do
+
+				close(54)
+
+				open(55,file=eam_embfile(2),status='old')
+
+				do i=1,eam_nrho
+					read(55,*) dummy,eam_emb(2,i) 
+				end do
+
+				close(55)
+			end if
+
+			! Populate the cross pair interaction array with data from preexisting potential
+			if(eam_existcrosspair)then
+				open(56,file=eam_pairfile(3),status='old')
+
+				do i=1,eam_nr
+					read(56,*) dummy,eam_pair(3,i)
+				end do
+
+				close(56)
+			end if
+		end if		
+	end subroutine
+	
+	! Write the setfl file to be used with LAMMPS
+	function eam_writepot(potfile,isthebest)		
+		implicit none
+
+		character*40,intent(in)	:: potfile
+		logical,intent(in)	:: isthebest
+		integer			:: i,j,next
+		double precision	:: r,rho
+		integer			:: eam_writepot
+		
+		eam_return=0
+		next=0
+	
+		! What if this is the best parameter set so far?
+		if(isthebest)then
+			if(eam_nel==1)then
+				if(.not.eam_existemb(1))then
+					open(61,file=eam_embfile(1))
+					open(62,file=eam_rhofile(1))
+				end if
+
+				if(.not.eam_existpair(1))then
+					open(63,file=eam_pairfile(1))
+				end if
+			end if
+			
+			if(eam_nel==2)then	
+				if(.not.eam_existemb(2))then
+					open(71,file=eam_embfile(2))
+					open(72,file=eam_rhofile(2))
+				end if
+
+				if(.not.eam_existpair(2))then
+					open(73,file=eam_pairfile(2))
+				end if
+
+				if(.not.eam_existcrosspair)then
+					open(83,file=eam_pairfile(3))
+				end if
+
+				if(eam_fs)then
+					open(64,file=eam_rhofile(3))
+					open(74,file=eam_rhofile(4))
+				end if
+			end if
+		end if
+
+		! Compute the potential functions related to the first element
+		if(eam_nel==1)then
+			if(.not.eam_existemb(1))then
+				! Compute the embedding function of the first element
+				do i=1,eam_nrho
+					if(i==1) call check_emb(1)
+
+					rho=(i-1)*eam_drho
+					eam_emb(1,i)=femb(rho,1)
+
+					if(eam_return==-1) goto 929
+				end do
+
+				next=next+nparemb
+
+				! Compute the rho function of the first element
+				eam_delta=(eam_rmax(1)-eam_r0(1))/eam_nknotsrho
+				j=1+next
+
+				do i=1,eam_nr
+					if(i==1) call check_rho(j)
+
+					r=(i-1)*eam_dr
+					eam_rho(1,i)=frho(r,j,1)
+
+					if(eam_return==-1) goto 929
+				end do
+				
+				next=next+nparrho
+			end if
+			
+			if(.not.eam_existpair(1))then
+				! Compute the pairwise function for 1-1 interactions
+				eam_delta=(eam_rmax(2)-eam_r0(2))/eam_nknotspair
+				j=1+next
+
+				do i=1,eam_nr
+					if(i==1) call check_pair(j,2)
+
+					r=(i-1)*eam_dr
+					eam_pair(1,i)=fpair(r,j,2)
+
+					if(eam_return==-1) goto 929
+				end do
+
+				next=next+nparpair
+			end if
+		end if
+
+		! If we have a second element... Compute the potential functions related to the second element
+		if(eam_nel==2)then
+			if(.not.eam_existemb(2))then
+				! Compute the embedding function of the second element
+				j=1+next
+
+				do i=1,eam_nrho
+					if(i==1) call check_emb(j)
+
+					rho=(i-1)*eam_drho
+					eam_emb(2,i)=femb(rho,j)
+
+					if(eam_return==-1) goto 929
+				end do
+
+				next=next+nparemb
+
+				! Compute the rho function(s) of the second element
+				eam_delta=(eam_rmax(3)-eam_r0(3))/eam_nknotsrho
+				j=1+next
+
+				do i=1,eam_nr
+					if(i==1) call check_rho(j)
+
+					r=(i-1)*eam_dr
+					eam_rho(2,i)=frho(r,j,3)
+
+					if(eam_return==-1) goto 929
+				end do
+
+				next=next+nparrho
+			end if
+
+			if(.not.eam_existpair(2))then
+			! Compute the pairwise function for 2-2 interaction
+				eam_delta=(eam_rmax(4)-eam_r0(4))/eam_nknotspair
+				j=1+next
+
+				do i=1,eam_nr
+					if(i==1) call check_pair(j,4)
+
+					r=(i-1)*eam_dr
+					eam_pair(2,i)=fpair(r,j,4)
+
+					if(eam_return==-1) goto 929
+				end do
+
+				next=next+nparpair
+			end if
+
+			! Compute the pairwise function for 1-2 interaction if 2 elements are to be mixed
+			if(.not.eam_existcrosspair)then
+				eam_delta=(eam_rmax(5)-eam_r0(5))/eam_nknotspair
+				j=1+next
+
+				do i=1,eam_nr
+					if(i==1) call check_pair(j,5)
+
+					r=(i-1)*eam_dr
+					eam_pair(3,i)=fpair(r,j,5)
+
+					if(eam_return==-1) goto 929
+				end do
+
+				next=next+nparpair
+			end if
+
+			! If Finnis-Sinclair, compute the rho function of the first element at the location of the second and vice-versa
+			if(eam_fs)then
+				if(eam_fs_rhoscale)then
+					! Rescale the density for 1-2 interaction
+					j=1+next
+
+					if(params(j)<=0.0) params(j)=EPSILON
+
+					do i=1,eam_nr
+						eam_rho(3,i)=params(j)*eam_rho(1,i)	
+					end do
+
+					! Rescale the density for 2-1 interaction
+					j=j+1
+
+					if(params(j)<=0.0) params(j)=EPSILON
+
+					do i=1,eam_nr
+						eam_rho(4,i)=params(j)*eam_rho(2,i)
+					end do
+				else
+					! Compute the density for 1-2 interaction
+					eam_delta=(eam_rmax(6)-eam_r0(6))/eam_nknotsrho
+					j=1+next
+
+					do i=1,eam_nr
+						if(i==1) call check_rho(j)
+
+						r=(i-1)*eam_dr
+						eam_rho(3,i)=frho(r,j,6)
+
+						if(eam_return==-1) goto 929
+					end do
+
+					next=next+nparrho
+
+					! Compute the density for 2-1 interaction
+					eam_delta=(eam_rmax(7)-eam_r0(7))/eam_nknotsrho
+					j=1+next
+
+					do i=1,eam_nr
+						if(i==1) call check_rho(j)
+
+						r=(i-1)*eam_dr
+						eam_rho(4,i)=frho(r,j,7)
+
+						if(eam_return==-1) goto 929
+					end do
+				end if
+			end if
+		end if
+
+		! Open the potential file and write the header
+		open(48,file=potfile)
+
+		write(48,'(A)') 'This is an embedded atom method (EAM) potential'
+		write(48,'(A)') 'derived with the RMCPOT code developed by'
+		write(48,'(A)') 'Prof. Roberto G. A. Veiga at CECS, UFABC.' 
+		write(48,'(I4,2A4)') eam_nel,eam_el(1:eam_nel)
+		write(48,'(I8,F10.6,I8,2F10.6)') eam_nrho,eam_drho,eam_nr,eam_dr,eam_cut	
+		write(48,'(I5,2F10.6,A8)') eam_anumber(1),eam_amass(1),eam_a0(1),eam_struct(1)
+
+		! Write the embedding and rho potential functions
+		! Embedding function of element 1
+		do i=1,eam_nrho
+			write(48,*) eam_emb(1,i)
+
+			if(isthebest.and.(.not.eam_existemb(1)))then
+				rho=(i-1)*eam_drho
+
+				write(61,*) rho,eam_emb(1,i)
+			end if
+		end do
+
+		! Density function of element 1
+		do i=1,eam_nr
+			write(48,*) eam_rho(1,i)
+
+			if(isthebest.and.(.not.eam_existemb(1)))then
+				r=(i-1)*eam_dr
+
+				write(62,*) r,eam_rho(1,i)
+			end if
+		end do
+
+		! What if we have a second element?
+		if(eam_nel==2)then
+			! If Finnis-Sinclair, density function of the 1-2 interaction
+			if(eam_fs)then
+				do i=1,eam_nr
+					write(48,*) eam_rho(3,i)
+
+					if(isthebest)then
+						r=(i-1)*eam_dr
+
+						write(64,*) r,eam_rho(3,i)
+					end if
+				end do
+			end if
+
+			! Header of the second element
+			write(48,'(I5,2F10.6,A8)') eam_anumber(2),eam_amass(2),eam_a0(2),eam_struct(2)
+
+			! Embedding function of element 2
+			do i=1,eam_nrho
+				write(48,*) eam_emb(2,i)
+
+				if(isthebest.and.(.not.eam_existemb(2)))then
+					rho=(i-1)*eam_drho
+ 
+					write(71,*) rho,eam_emb(2,i)
+				end if
+			end do
+
+			! If Finnis-Sinclair, density function for the 2-1 interaction
+			if(eam_fs)then
+				do i=1,eam_nr		
+					write(48,*) eam_rho(4,i)
+
+					if(isthebest)then
+						r=(i-1)*eam_dr
+
+						write(74,*) r,eam_rho(4,i)
+					end if
+				end do
+			end if
+
+			! Density function element 2
+			do i=1,eam_nr		
+				write(48,*) eam_rho(2,i)
+
+				if(isthebest.and.(.not.eam_existemb(2)))then
+					r=(i-1)*eam_dr
+
+					write(72,*) r,eam_rho(2,i)
+				end if
+			end do
+		end if
+
+		! Write the pairwise functions
+		! Pairwise 1-1		
+		do i=1,eam_nr	
+			r=(i-1)*eam_dr
+			
+			write(48,*) eam_pair(1,i)*r
+
+			if(isthebest.and.(.not.eam_existpair(1)))then 
+				write(63,*) r,eam_pair(1,i)
+			end if
+		end do
+
+		if(eam_nel==2)then
+			! Pairwise 1-2
+			do i=1,eam_nr
+				r=(i-1)*eam_dr
+				
+				write(48,*) eam_pair(3,i)*r
+
+				if(isthebest.and.(.not.eam_existcrosspair))then
+					write(83,*) r,eam_pair(3,i)
+				end if
+			end do
+
+			! Pairwise 2-2
+			do i=1,eam_nr
+				r=(i-1)*eam_dr
+
+				write(48,*) eam_pair(2,i)*r
+
+				if(isthebest.and.(.not.eam_existpair(2)))then
+					write(73,*) r,eam_pair(2,i)
+				end if
+			end do
+
+			! Concentration Dependent parameters
+			if(eam_cd_ncoeff>0)then
+				write(48,*)
+				write(48,*) eam_cd_ncoeff-1,(params(j),j=nparams-eam_cd_ncoeff+1,nparams)
+			end if
+		end if
+
+		! Close the potential and data files
+		close(48)
+
+		if(isthebest)then
+			if(eam_nel==1)then
+				if(.not.eam_existemb(1))then
+					close(61)
+					close(62)
+				end if
+
+				if(.not.eam_existpair(1))then
+					close(63)
+				end if
+			end if
+
+			if(eam_nel==2)then	
+				if(.not.eam_existemb(2))then	
+					close(71)
+					close(72)
+				end if
+
+				if(.not.eam_existpair(2))then
+					close(73)
+				end if
+
+				if(.not.eam_existcrosspair)then
+					close(83)
+				end if
+
+				if(eam_fs)then
+					close(64)
+					close(74)
+				end if
+			end if
+		end if
+
+929		eam_writepot=eam_return
+
+		return	
+	end function
+
+! Below, one can see the private functions used to generate the three potential functions:
+
+	! Return the embedding function
+	function femb(rho,x)
+		implicit none
+
+		double precision,intent(in)	:: rho
+		integer,intent(in)		:: x
+		double precision		:: femb
+
+		femb=0.0d0 
+
+		femb=params(x)*sqrt(rho)+params(x+1)*rho*rho
+
+		if(eam_embfunc=='quartic')then
+			femb=femb+params(x+2)*rho+params(x+3)*rho*rho*rho*rho
+		end if
+
+		! If for some weird reason this is NaN, eam_return is set to -1
+		if(isnan(femb)) eam_return=-1
+	
+		return
+	end function
+
+	! Return the rho function
+	function frho(r,x,y)
+		implicit none
+
+		integer,intent(in)		:: x,y
+		double precision,intent(in)	:: r
+		integer				:: i,j
+		double precision		:: term,knot
+		double precision		:: frho
+
+		frho=0.0d0
+
+		select case(eam_rhofunc)
+			case('mendelev')		
+				do i=1,eam_nknotsrho
+					j=i-1
+
+					if(eam_knotsrho(i)>EPSILON)then
+						knot=eam_knotsrho(i)
+					else
+						knot=eam_r0(y)+eam_delta*j
+					end if
+
+					term=params(x+j)*h(knot-r)*(knot-r)**3			
+					frho=frho+term
+				end do
+			case('thomas-fermi')
+				! rho=S*exp(-beta*r)/r*[Quartic screening function]
+				if(r>0.0d0.and.r<=eam_rmax(y))then
+					frho=params(x)*exp(-params(x+1)*r)/r*fquartscr((eam_rmax(y)-r)/params(x+2))
+				end if
+			case('exp-decay')
+				! rho=a*exp(-b*r)
+				frho=params(x)*exp(-params(x+1)*r)
+			case('exp-decay-quartscr')
+				! rho=a*exp(-b*r)*[Quartic screening function]
+				if(r<=eam_rmax(y))then
+					frho=params(x)*exp(-params(x+1)*r)*fquartscr(eam_rmax(y)-r)
+				end if
+			case('exp-decay-sinscr')
+				! rho=a*exp(-b*r)*[Sinus screening function]
+				if(r<=eam_rmax(y))then
+					frho=params(x)*exp(-params(x+1)*r)*fsinscr(r,0.0d0,eam_rmax(y))
+				end if
+		end select
+
+		! What if the potential is generating negative values of rho at distances where physical interactions are possible?
+		if(r>=eam_rmin.and.frho<0.0d0) zeta=zeta+fzeta(frho,0.0d0)	
+
+		! If for some weird reason this is NaN...
+		if(isnan(frho)) eam_return=-1
+
+		return
+	end function
+
+	! Return the pairwise function
+	function fpair(r,x,y)
+		implicit none
+
+		integer,intent(in)		:: x,y
+		double precision,intent(in)	:: r
+		integer				:: i,j
+		double precision		:: term,knot,d
+		double precision		:: vr,va,scrmorse,dfpair
+		double precision		:: fpair
+
+		fpair=0.0d0
+
+		select case(eam_pairfunc)
+			case('mendelev')
+				do i=1,eam_nknotspair
+					j=i-1
+
+					if(eam_knotspair(i)>EPSILON)then
+						knot=eam_knotspair(i)
+					else
+						knot=eam_r0(y)+eam_delta*j
+					end if
+
+					term=params(x+j)*h(knot-r)*(knot-r)**3
+					fpair=fpair+term	
+				end do
+			case('generalized-morse')
+				if(r<=eam_rmax(y))then
+					vr=params(x)/(params(x+1)-1.0)
+					vr=vr*exp(-params(x+2)*sqrt(2.0*params(x+1))*(r-params(x+3)))	! Repulsive part
+					va=-params(x)*params(x+1)/(params(x+1)-1.0)
+					va=va*exp(-params(x+2)*sqrt(2.0/params(x+1))*(r-params(x+3)))	! Attractive part
+					fpair=vr+va+params(x+4)
+				end if
+			case('screened-morse')
+				if(r<=eam_rmax(y))then
+					dfpair=2.0*params(x)*params(x+1)
+					dfpair=dfpair*(exp(params(x+1)*(eam_rmax(y)-params(x+2)))-1.0)
+					dfpair=dfpair*exp(params(x+1)*(eam_rmax(y)-params(x+2)))
+
+					scrmorse=(eam_rmax(y)/20.0)*(1.0-(r/eam_rmax(y))**20.0)
+					
+					! f(r)=D*(1.0-exp(-a*(r-r0)))^2-D*(1.0-exp(-a*(rmax-r0)))^2+f'(r)	
+					fpair=params(x)*(1.0-exp(params(x+1)*(r-params(x+2))))**2.0
+					fpair=fpair-params(x)*(1.0-exp(params(x+1)*(eam_rmax(y)-params(x+2))))**2.0
+					fpair=fpair+scrmorse*dfpair
+				end if
+			case('tersoff-like')
+				if(r<=eam_rmax(y))then
+					vr=params(x)*exp(-params(x+1)*r)	! Repulsive part
+					va=-params(x+2)*exp(-params(x+3)*r)	! Attractive part
+					fpair=fsinscr(r,(eam_rmax(y)-params(x+4)),params(x+4))*(vr+va)
+				end if
+			case('exp-decay')
+				! f(r)=a*exp(-b*r)
+				fpair=params(x)*exp(-params(x+1)*r)
+			case('exp-decay-quartscr')
+				! f(r)=a*exp(-b*r)*[Quartic screening function]
+				if(r<=eam_rmax(y))then
+					fpair=params(x)*exp(-params(x+1)*r)*fquartscr(eam_rmax(y)-r)
+				end if
+			case('exp-decay-sinscr')
+				! r=a*exp(-b*r)*[Sinus screening function]
+				if(r<=eam_rmax(y))then
+					fpair=params(x)*exp(-params(x+1)*r)*fsinscr(r,0.0d0,eam_rmax(y))
+				end if
+		end select
+
+		! What if the parameter set is generating bad values for the pair function?
+		if(r<=eam_rmin.and.fpair<0.0d0) zeta=zeta+fzeta(fpair,0.0d0)
+
+		! If for some weird reason this is NaN...
+		if(isnan(fpair)) eam_return=-1
+
+		return
+	end function
+
+	! Check the parameters of the embedding function
+	subroutine check_emb(x)
+		integer,intent(in)	:: x
+
+		select case(eam_embfunc)
+			case('quadratic')
+				if(abs(params(x))<abs(params(x+1))) zeta=zeta+fzeta(abs(params(x+1)),abs(params(x)))
+
+				if(params(x)>=0.0.or.params(x+1)<=0.0)then
+					eam_return=-1
+				end if
+			case('quartic')				
+				if(abs(params(x))<abs(params(x+1))) zeta=zeta+fzeta(abs(params(x+1)),abs(params(x)))
+				if(abs(params(x+2))<abs(params(x+3))) zeta=zeta+fzeta(abs(params(x+3)),abs(params(x+2)))
+
+				if(params(x)>=0.0.or.params(x+1)>=0.0.or.params(x+2)<=0.0.or.params(x+3)<=0.0)then
+					eam_return=-1
+				end if
+		end select
+	end subroutine
+
+	! Check the parameters of the density function, imposing soft and hard constraints to the final solution
+	subroutine check_rho(x)
+		implicit none
+
+		integer,intent(in)	:: x
+		integer			:: i
+
+		select case(eam_rhofunc)
+			case('thomas-fermi')
+				if(params(x+1)<=0.0.or.params(x+2)<=0.0)then
+					eam_return=-1
+				end if
+			case('exp-decay')
+				if(params(x)<=0.0.or.params(x+1)<=0.0)then
+					eam_return=-1
+				end if
+			case('exp-decay-quartscr')
+				if(params(x)<=0.0.or.params(x+1)<=0.0)then
+					eam_return=-1
+				end if
+			case('exp-decay-sinscr')
+				if(params(x)<=0.0.or.params(x+1)<=0.0)then
+					eam_return=-1
+				end if
+		end select
+	end subroutine
+
+	! Check the parameters of the pairwise functions, imposing soft and hard constraints to the final solution
+	subroutine check_pair(x,y)
+		implicit none
+
+		integer,intent(in)		:: x,y
+		integer				:: i
+
+		select case(eam_pairfunc)
+			case('generalized-morse')
+				if(params(x+1)==1.0.or.params(x+1)<=0.0.or.params(x+2)<0.0)then
+					eam_return=-1
+				end if
+			case('screened-morse')
+				if(params(x)<=0.0.or.params(x+1)>=0.0.or.params(x+2)<=0.0.or.params(x+2)>=eam_rmax(y))then
+					eam_return=-1
+				end if
+			case('tersoff-like')
+				if(params(x)<=0.0.or.params(x+1)<=0.0.or.params(x+2)<=0.0.or.params(x+3)<=0.0)then
+					eam_return=-1
+				end if
+
+				if(params(x+2)>=params(x).or.params(x+1)>=params(x))then
+					eam_return=-1
+				end if
+
+				if(params(x+3)>=params(x+2).or.params(x+3)>=params(x+1))then
+					eam_return=-1
+				end if
+
+				if(params(x+4)<=0.0.or.params(x+4)>0.5*eam_rmax(y))then
+					eam_return=-1
+				end if
+			case('exp-decay')
+				if(params(x)<=0.0.or.params(x+1)<=0.0)then
+					eam_return=-1
+				end if
+			case('exp-decay-quartscr')
+				if(params(x)<=0.0.or.params(x+1)<=0.0)then
+					eam_return=-1
+				end if
+			case('exp-decay-sinscr')
+				if(params(x)<=0.0.or.params(x+1)<=0.0)then
+					eam_return=-1
+				end if
+		end select
+	end subroutine
+
+	! Return the value of the Heavside function
+	function h(dr)
+		implicit none
+
+		double precision,intent(in)	:: dr
+		double precision		:: h
+
+		h=0.0
+
+		if(dr>=0.0) h=1.0
+
+		return
+	end function			
+end module

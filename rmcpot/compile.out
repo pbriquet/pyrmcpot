@@ -1,0 +1,38 @@
+tersoff.f90:83:2:
+
+   if .not.(ter_ignore(1))then
+  1
+Error: Unclassifiable statement at (1)
+tersoff.f90:85:5:
+
+   endif
+     1
+Error: Expecting END FUNCTION statement at (1)
+tersoff.f90:92:3:
+
+    if .not.(ter_ignore(2))then  ! 2-2-2
+   1
+Error: Unclassifiable statement at (1)
+tersoff.f90:155:5:
+
+   end if
+     1
+Error: Expecting END FUNCTION statement at (1)
+potfunc.f90:6:5:
+
+  use tersoff
+     1
+Fatal Error: Can't open module file ‘tersoff.mod’ for reading at (1): Arquivo ou diretório inexistente
+compilation terminated.
+localmin.f90:4:5:
+
+  use potfunc
+     1
+Fatal Error: Can't open module file ‘potfunc.mod’ for reading at (1): Arquivo ou diretório inexistente
+compilation terminated.
+rmcpot.f90:6:5:
+
+  use tersoff
+     1
+Fatal Error: Can't open module file ‘tersoff.mod’ for reading at (1): Arquivo ou diretório inexistente
+compilation terminated.
