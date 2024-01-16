@@ -1,0 +1,34 @@
+ ---------------------------------------------------------
+
+                          RMCPOT:                         
+             a Reverse Monte Carlo code for the           
+       construction of interatomic POTential models,      
+                       version 0.27,                      
+              developed by Dr. Roberto Veiga              
+         at Universidade Federal do ABC, Brazil,          
+               as part of a project funded                
+            by São Paulo Research Foundation              
+
+ ---------------------------------------------------------
+
+   Parameter list (2) was found!
+   Minimum (absolute) values of the parameters:
+     1           0.0500000
+     2         -10.0000000
+     3           2.0000000
+   Maximum (absolute) values of the parameters:
+     1           5.0000000
+     2          -0.0500000
+     3           4.0000000
+
+   Reference data and weight factors:
+     1          -0.0900000           1.0000000
+     2           0.1300000           1.0000000
+     3          -0.6500000           1.0000000
+     4          -1.6700000           1.0000000
+     5          -0.0900000           1.0000000
+
+---------------
+=> ITERATION:    1
+=> Performing MC for sigma=        9999.9990234
+

@@ -1,0 +1,53 @@
+&INPMAIN
+	performsa=.false.
+	performmin=.false.
+	potmodel='eam/alloy'
+	potfile='temp.eam'
+	initialparams='file'
+	runpot='timeout -s 9 20s mpirun -np 8 lmp_gcc < input >& output'
+	normweight=.false.
+	penalty=1.0
+	seed=9915910
+/
+&INPSA
+        runonce=.false.
+	autosigma=.true.
+	sigma0=100000000.0
+	resetevery=300
+	recalcsigma=.true.
+	chitol=0.1
+	nstepsperpar=1000
+/
+&INPMIN
+	minalgo='stepmin'
+	maxitermin=10000
+	alphamin=0.0001
+/
+&INPEAMALLOY
+	eam_nel=2
+	eam_el(1)='Fe'
+	eam_el(2)='C'
+	eam_existemb(1)=.true.
+	eam_existemb(2)=.true.
+	eam_existrho(1)=.true.
+	eam_existrho(2)=.true.
+	eam_existpair(1)=.true.
+	eam_existpair(2)=.false.
+	eam_existcrosspair=.true.
+	eam_cd_ncoeff=0
+	eam_anumber(1)=26
+	eam_anumber(2)=6
+	eam_a0(1)=2.86
+	eam_a0(2)=2.46
+	eam_amass(1)=55.845
+	eam_amass(2)=12.0107
+	eam_nr=2400
+	eam_nrho=2400
+	eam_pairfunc='screened-morse'
+	eam_dr=0.0025
+	eam_drho=0.05
+	eam_r0=1.0
+	eam_rmax=4.0
+	eam_struct(1)='bcc'
+	eam_struct(2)='bcc'
+/
