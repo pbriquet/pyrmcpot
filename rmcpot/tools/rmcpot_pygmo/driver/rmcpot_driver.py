@@ -1,5 +1,13 @@
 import pygmo as pg
 import numpy as np
+
+import sys, os 
+_libraries = ["\\problem"]
+for _l in _libraries:
+    s = "e:\PBC\GitHub\pyrmcpot\\rmcpot\\tools\\rmcpot_pygmo\\" + _l
+    sys.path.append(os.path.abspath(s))
+
+
 from rmcpot_prob import rmcpot_prob
 
 def addprevchampion(population,index=None):
@@ -42,7 +50,8 @@ def savechampion(population):
     g.close()
 
 def run(mintype="global",minalgo="pso",ngen=1,nind=1):
-    prob=pg.problem(rmcpot_prob)
+    tmp = rmcpot_prob()
+    prob=pg.problem(tmp)
     
     if mintype=="global":
         print("Performing global minimization:\n-------------------------------\n")

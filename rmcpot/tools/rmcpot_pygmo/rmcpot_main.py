@@ -1,3 +1,9 @@
+import sys, os 
+_libraries = ["\driver"]
+for _l in _libraries:
+    s = sys.path[0] + _l
+    sys.path.append(os.path.abspath(s))
+
 import rmcpot_driver as driver
 
 nind=9

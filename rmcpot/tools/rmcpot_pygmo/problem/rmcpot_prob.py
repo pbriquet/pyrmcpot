@@ -4,13 +4,17 @@ import io
 import math as m
 
 class rmcpot_prob:
+    def __init__(self):
+        pass
+
     def fitness(self,x):
         try:
-            sp.Popen(["rm bestparamset.dat"]).wait()
+            sp.Popen(["rm E:\PBC\GitHub\pyrmcpot\\rmcpot\\tools\\rmcpot_pygmo\\fe-c\\fe-c\\run1\\bestparamset.dat"]).wait()
         except:
             pass
         
-        with open("paramset.dat.0","w") as f:
+        path = "E:\PBC\GitHub\pyrmcpot\\rmcpot\\tools\\rmcpot_pygmo\\fe-c\\fe-c\\run1\paramset.dat.0"
+        with open(path,"w") as f:
             f.write("1000000000000.0 %d\n" % len(x))
             
             for i in range(len(x)):
@@ -19,6 +23,7 @@ class rmcpot_prob:
         finished=False
         cmd='rmcpot &'
         args=shlex.split(cmd)
+
         run=sp.Popen(args,stdin=sp.PIPE,stdout=sp.PIPE,stderr=sp.PIPE).communicate()
         out=io.StringIO(run[0].decode())
         lines=out.readlines()
@@ -42,7 +47,8 @@ class rmcpot_prob:
         indlow=1
         indhigh=2
         
-        with open("paramlist2",'r') as f:
+        path = "E:\PBC\GitHub\pyrmcpot\\rmcpot\\tools\\rmcpot_pygmo\\fe-c\\fe-c\\run1\paramlist2"
+        with open(path,'r') as f:
             lines=f.readlines()
             
         for line in lines:            
