@@ -1,6 +1,6 @@
 &INPMAIN
-	performsa=.true.
-	performmin=.true.
+	performsa=.false.
+	performmin=.false.
 	potmodel='eam/alloy'
 	potfile='temp.eam'
 	initialparams='file'
